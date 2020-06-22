@@ -15,10 +15,10 @@ import zlib
 from fastavro import const
 from ._logical_writers import LOGICAL_WRITERS
 from ._validation import _validate
-from ._six import utob, long, iteritems, appendable
 from ._read import HEADER_SCHEMA, SYNC_SIZE, MAGIC, reader
 from ._schema import extract_record_type, extract_logical_type, parse_schema
 from ._schema_common import SCHEMA_DEFS
+from ._write_common import _is_appendable
 
 CYTHON_MODULE = 1  # Tests check this to confirm whether using the Cython code.
 
@@ -122,7 +122,7 @@ cdef inline write_bytes(bytearray fo, bytes datum):
 cdef inline write_utf8(bytearray fo, datum):
     """A string is encoded as a long followed by that many bytes of UTF-8
     encoded character data."""
-    write_bytes(fo, utob(datum))
+    write_bytes(fo, datum.encode())
 
 
 cdef inline write_crc32(bytearray fo, bytes bytes):
@@ -188,7 +188,7 @@ cdef write_map(bytearray fo, object datum, dict schema):
         if len(datum) > 0:
             write_long(fo, len(datum))
             vtype = schema['values']
-            for key, val in iteritems(datum):
+            for key, val in datum.items():
                 write_utf8(fo, key)
                 write_data(fo, val, vtype)
         write_long(fo, 0)
@@ -197,7 +197,7 @@ cdef write_map(bytearray fo, object datum, dict schema):
         if len(d_datum) > 0:
             write_long(fo, len(d_datum))
             vtype = schema['values']
-            for key, val in iteritems(d_datum):
+            for key, val in d_datum.items():
                 write_utf8(fo, key)
                 write_data(fo, val, vtype)
         write_long(fo, 0)
@@ -342,7 +342,7 @@ cpdef write_data(bytearray fo, datum, schema):
 cpdef write_header(bytearray fo, dict metadata, bytes sync_marker):
     header = {
         'magic': MAGIC,
-        'meta': {key: utob(value) for key, value in iteritems(metadata)},
+        'meta': {key: value.encode() for key, value in metadata.items()},
         'sync': sync_marker
     }
     write_data(fo, header, HEADER_SCHEMA)
@@ -526,7 +526,7 @@ cdef class Writer(object):
         self.sync_interval = sync_interval
         self.compression_level = compression_level
 
-        if appendable(self.fo):
+        if _is_appendable(self.fo):
             # Seed to the beginning to read the header
             self.fo.seek(0)
             avro_reader = reader(self.fo)
@@ -554,7 +554,7 @@ cdef class Writer(object):
             if isinstance(schema, dict):
                 schema = {
                     key: value
-                    for key, value in iteritems(schema)
+                    for key, value in schema.items()
                     if key != "__fastavro_parsed"
                 }
             elif isinstance(schema, list):
@@ -564,7 +564,7 @@ cdef class Writer(object):
                         schemas.append(
                             {
                                 key: value
-                                for key, value in iteritems(s)
+                                for key, value in s.items()
                                 if key != "__fastavro_parsed"
                             }
                         )

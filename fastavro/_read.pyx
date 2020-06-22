@@ -9,22 +9,18 @@
 
 import bz2
 import zlib
-import datetime
+from datetime import datetime, time, date, timezone, timedelta
 from decimal import Context
-from fastavro.six import MemoryIO
+from io import BytesIO
 from uuid import UUID
 
 import json
 
-from ._six import (
-    btou, utob, iteritems, is_str, long, be_signed_bytes_to_int
-)
 from ._schema import extract_record_type, extract_logical_type, parse_schema
 from ._schema_common import SCHEMA_DEFS
 from ._read_common import (
     SchemaResolutionError, MAGIC, SYNC_SIZE, HEADER_SCHEMA, missing_codec_lib
 )
-from ._timezone import epoch
 from .const import (
     MCS_PER_HOUR, MCS_PER_MINUTE, MCS_PER_SECOND, MLS_PER_HOUR, MLS_PER_MINUTE,
     MLS_PER_SECOND, DAYS_SHIFT
@@ -54,7 +50,7 @@ AVRO_TYPES = {
 }
 
 decimal_context = Context()
-
+epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 ctypedef int int32
 ctypedef unsigned int uint32
@@ -147,20 +143,18 @@ cdef inline read_boolean(fo):
         raise ReadError
 
 
-cpdef parse_timestamp(data, resolution):
-    return epoch + datetime.timedelta(seconds=data / resolution)
-
-
 cpdef read_timestamp_millis(data, writer_schema=None, reader_schema=None):
-    return parse_timestamp(data, float(MLS_PER_SECOND))
+    # Cannot use datetime.fromtimestamp: https://bugs.python.org/issue36439
+    return epoch + timedelta(seconds=(data / MLS_PER_SECOND))
 
 
 cpdef read_timestamp_micros(data, writer_schema=None, reader_schema=None):
-    return parse_timestamp(data, float(MCS_PER_SECOND))
+    # Cannot use datetime.fromtimestamp: https://bugs.python.org/issue36439
+    return epoch + timedelta(seconds=(data / MCS_PER_SECOND))
 
 
 cpdef read_date(data, writer_schema=None, reader_schema=None):
-    return datetime.date.fromordinal(data + DAYS_SHIFT)
+    return date.fromordinal(data + DAYS_SHIFT)
 
 
 cpdef read_uuid(data, writer_schema=None, reader_schema=None):
@@ -172,7 +166,7 @@ cpdef read_time_millis(data, writer_schema=None, reader_schema=None):
     m = int(data / MLS_PER_MINUTE) % 60
     s = int(data / MLS_PER_SECOND) % 60
     mls = int(data % MLS_PER_SECOND) * 1000
-    return datetime.time(h, m, s, mls)
+    return time(h, m, s, mls)
 
 
 cpdef read_time_micros(data, writer_schema=None, reader_schema=None):
@@ -180,14 +174,14 @@ cpdef read_time_micros(data, writer_schema=None, reader_schema=None):
     m = int(data / MCS_PER_MINUTE) % 60
     s = int(data / MCS_PER_SECOND) % 60
     mcs = data % MCS_PER_SECOND
-    return datetime.time(h, m, s, mcs)
+    return time(h, m, s, mcs)
 
 
 cpdef read_decimal(data, writer_schema=None, reader_schema=None):
     scale = writer_schema.get('scale', 0)
     precision = writer_schema['precision']
 
-    unscaled_datum = be_signed_bytes_to_int(data)
+    unscaled_datum = int.from_bytes(data, byteorder='big', signed=True)
 
     decimal_context.prec = precision
     return decimal_context.create_decimal(unscaled_datum).\
@@ -285,7 +279,7 @@ cdef unicode read_utf8(fo):
     """A string is encoded as a long followed by that many bytes of UTF-8
     encoded character data.
     """
-    return btou(read_bytes(fo), 'utf-8')
+    return read_bytes(fo).decode()
 
 
 cdef read_fixed(fo, writer_schema):
@@ -531,7 +525,7 @@ cdef read_record(
         # fill in default values
         if len(readers_field_dict) > len(record):
             writer_fields = [f['name'] for f in writer_schema['fields']]
-            for f_name, field in iteritems(readers_field_dict):
+            for f_name, field in readers_field_dict.items():
                 if f_name not in writer_fields and f_name not in record:
                     if 'default' in field:
                         record[field['name']] = field['default']
@@ -556,17 +550,16 @@ LOGICAL_READERS = {
 
 cpdef maybe_promote(data, writer_type, reader_type):
     if writer_type == "int":
-        if reader_type == "long":
-            return long(data)
+        # No need to promote to long since they are the same type in Python
         if reader_type == "float" or reader_type == "double":
             return float(data)
     if writer_type == "long":
         if reader_type == "float" or reader_type == "double":
             return float(data)
     if writer_type == "string" and reader_type == "bytes":
-        return utob(data)
+        return data.encode()
     if writer_type == "bytes" and reader_type == "string":
-        return btou(data, 'utf-8')
+        return data.decode()
     return data
 
 
@@ -669,7 +662,7 @@ cpdef skip_sync(fo, sync_marker):
 
 cpdef null_read_block(fo):
     """Read block in "null" codec."""
-    return MemoryIO(read_bytes(fo))
+    return BytesIO(read_bytes(fo))
 
 
 cpdef deflate_read_block(fo):
@@ -677,13 +670,13 @@ cpdef deflate_read_block(fo):
     data = read_bytes(fo)
     # -15 is the log of the window size; negative indicates "raw" (no
     # zlib headers) decompression.  See zlib.h.
-    return MemoryIO(zlib.decompress(data, -15))
+    return BytesIO(zlib.decompress(data, -15))
 
 
 cpdef bzip2_read_block(fo):
     """Read block in "bzip2" codec."""
     data = read_bytes(fo)
-    return MemoryIO(bz2.decompress(data))
+    return BytesIO(bz2.decompress(data))
 
 
 BLOCK_READERS = {
@@ -697,7 +690,7 @@ cpdef snappy_read_block(fo):
     length = read_long(fo)
     data = fo.read(length - 4)
     fo.read(4)  # CRC
-    return MemoryIO(snappy.decompress(data))
+    return BytesIO(snappy.decompress(data))
 
 
 try:
@@ -711,7 +704,7 @@ else:
 cpdef zstandard_read_block(fo):
     length = read_long(fo)
     data = fo.read(length)
-    return MemoryIO(zstd.ZstdDecompressor().decompress(data))
+    return BytesIO(zstd.ZstdDecompressor().decompress(data))
 
 
 try:
@@ -725,7 +718,7 @@ else:
 cpdef lz4_read_block(fo):
     length = read_long(fo)
     data = fo.read(length)
-    return MemoryIO(lz4.block.decompress(data))
+    return BytesIO(lz4.block.decompress(data))
 
 
 try:
@@ -739,7 +732,7 @@ else:
 cpdef xz_read_block(fo):
     length = read_long(fo)
     data = fo.read(length)
-    return MemoryIO(lzma.decompress(data))
+    return BytesIO(lzma.decompress(data))
 
 
 try:
@@ -867,7 +860,7 @@ class file_reader:
 
         # `meta` values are bytes. So, the actual decoding has to be external.
         self.metadata = {
-            k: btou(v) for k, v in iteritems(self._header['meta'])
+            k: v.decode() for k, v in self._header['meta'].items()
         }
 
         self._schema = json.loads(self.metadata['avro.schema'])
@@ -943,7 +936,7 @@ cpdef schemaless_reader(fo, writer_schema, reader_schema=None,
 
 
 cpdef is_avro(path_or_buffer):
-    if is_str(path_or_buffer):
+    if isinstance(path_or_buffer, str):
         fp = open(path_or_buffer, 'rb')
         close = True
     else:

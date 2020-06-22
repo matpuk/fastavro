@@ -1,6 +1,5 @@
+from io import BytesIO
 import fastavro
-
-from fastavro.six import MemoryIO
 
 import pytest
 
@@ -18,7 +17,7 @@ def test_schemaless_writer_and_reader():
         }]
     }
     record = {"field": "test"}
-    new_file = MemoryIO()
+    new_file = BytesIO()
     fastavro.schemaless_writer(new_file, schema, record)
     new_file.seek(0)
     new_record = fastavro.schemaless_reader(new_file, schema)
@@ -60,7 +59,7 @@ def test_schemaless_writer_and_reader_with_union():
     record = {"id": 123, "payload": (
         "test.ApplicationSubmitted", {"applicationId": "123456789UT",
                                       "data": "..."})}
-    new_file = MemoryIO()
+    new_file = BytesIO()
     fastavro.schemaless_writer(new_file, schema, record)
     new_file.seek(0)
     new_record = fastavro.schemaless_reader(
@@ -79,14 +78,14 @@ def test_boolean_roundtrip():
         }]
     }
     record = {"field": True}
-    new_file = MemoryIO()
+    new_file = BytesIO()
     fastavro.schemaless_writer(new_file, schema, record)
     new_file.seek(0)
     new_record = fastavro.schemaless_reader(new_file, schema)
     assert record == new_record
 
     record = {"field": False}
-    new_file = MemoryIO()
+    new_file = BytesIO()
     fastavro.schemaless_writer(new_file, schema, record)
     new_file.seek(0)
     new_record = fastavro.schemaless_reader(new_file, schema)
@@ -124,7 +123,7 @@ def test_default_values_in_reader():
     }
 
     record = {'good_field': 1}
-    new_file = MemoryIO()
+    new_file = BytesIO()
     fastavro.schemaless_writer(new_file, writer_schema, record)
     new_file.seek(0)
     new_record = fastavro.schemaless_reader(

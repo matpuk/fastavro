@@ -4,7 +4,6 @@ from os import path
 
 import json
 
-from .six import iteritems
 from ._schema_common import (
     PRIMITIVES, UnknownType, SchemaParseException, RESERVED_PROPERTIES,
     SCHEMA_DEFS, OPTIONAL_FIELD_PROPERTIES, RESERVED_FIELD_PROPERTIES,
@@ -236,7 +235,7 @@ def _parse_schema(schema, namespace, expand, _write_hint, named_schemas):
 
         parsed_schema = {
             key: value
-            for key, value in iteritems(schema)
+            for key, value in schema.items()
             if key not in RESERVED_PROPERTIES
         }
         parsed_schema["type"] = schema_type
@@ -340,7 +339,7 @@ def _parse_schema(schema, namespace, expand, _write_hint, named_schemas):
 def parse_field(field, namespace, expand, named_schemas):
     parsed_field = {
         key: value
-        for key, value in iteritems(field)
+        for key, value in field.items()
         if key not in RESERVED_FIELD_PROPERTIES
     }
 
